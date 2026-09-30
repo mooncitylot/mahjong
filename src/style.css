@@ -371,6 +371,47 @@ body {
   margin-left: 10px;
 }
 
+.seat.me .hand {
+  /* Room for the raised drawn tile and its label. */
+  padding-top: 18px;
+}
+
+.hand .tile.drawn {
+  position: relative;
+  margin-left: 14px;
+  background: var(--turn-bg);
+  border-color: var(--turn);
+  box-shadow: 0 0 0 1px var(--turn);
+  transform: translateY(-6px);
+}
+
+.hand .tile.drawn::before {
+  content: 'new';
+  position: absolute;
+  top: -15px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--turn);
+  pointer-events: none;
+}
+
+@media (hover: hover) {
+  .hand .tile.drawn.pick:hover {
+    transform: translateY(-10px);
+  }
+}
+
+.hand .tile.drawn.selected {
+  transform: translateY(-12px);
+  box-shadow:
+    0 0 0 1px var(--turn),
+    0 4px 10px rgba(0, 0, 0, 0.15);
+}
+
 .backs .tile.drawn {
   margin-left: 6px;
 }

@@ -21,10 +21,13 @@ export type Pending =
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/** Vary a delay by ±30% so bots don't move in a mechanical rhythm. */
+const jitter = (ms: number): number => ms * (0.7 + Math.random() * 0.6);
+
 export class Engine {
   state: GameState;
   pending: Pending = null;
-  speed = 700;
+  speed = 1000;
   onUpdate: () => void = () => {};
   private running = false;
 
@@ -96,7 +99,7 @@ export class Engine {
           }
           this.settle(claims.bots);
           this.emit();
-          await sleep(this.speed);
+          await sleep(jitter(this.speed));
           continue;
         }
 
@@ -104,12 +107,12 @@ export class Engine {
           const claims = this.gatherClaims(g.lastDiscard!.from);
           if (claims.human.length > 0) {
             this.emit();
-            await sleep(this.speed / 2);
+            await sleep(jitter(this.speed / 2));
             this.pending = { kind: 'claim', options: claims.human, others: claims.bots };
             this.emit();
             return;
           }
-          await sleep(this.speed / 2);
+          await sleep(jitter(this.speed / 2));
           this.settle(claims.bots);
           this.emit();
           continue;
@@ -122,7 +125,7 @@ export class Engine {
           return;
         }
         this.emit();
-        await sleep(this.speed);
+        await sleep(jitter(this.speed));
         applySelf(g, botTurn(g, g.turn));
         this.emit();
       }
