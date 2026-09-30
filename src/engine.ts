@@ -61,6 +61,8 @@ export class Engine {
     if (this.pending?.kind !== 'act') return;
     this.pending = null;
     applySelf(this.state, action);
+    // Show the move at once rather than after the claim window's pause.
+    this.emit();
     void this.run();
   }
 

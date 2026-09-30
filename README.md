@@ -39,6 +39,18 @@ points instead of cheap all-chow hands they could never declare. They claim a
 discard only when it does not push the hand backwards and the exposure pays for
 itself.
 
+## Phones
+
+Portrait works; nothing forces landscape. Under 700px wide the opponents stack
+top to bottom in play order (Right, Across, Left) with a tile count in place of
+their face-down tiles, and your hand plus the turn-order strip stay pinned to
+the bottom of the screen. Your hand is sized to fit fourteen tiles across. On
+touch screens a tap raises a tile and a second tap (or the Discard button)
+throws it, so a stray touch never discards.
+
+The seat on the move is outlined in amber with a pulsing badge, and the
+turn-order strip lights the same seat.
+
 ## Layout
 
 | File | Role |

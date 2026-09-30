@@ -66,6 +66,41 @@ function tileEl(t: Tile, o: TileOpts = {}): HTMLElement {
 
 const windOf = (g: GameState, seat: Seat): string => SEAT_NAMES[(seat - g.dealer + 4) % 4];
 
+/** Seat whose move the table is waiting on, or null between hands. */
+function activeSeat(g: GameState, engine: Engine): Seat | null {
+  if (g.phase === 'over') return null;
+  if (engine.pending?.kind === 'claim') return HUMAN;
+  if (g.phase === 'claim' || g.robbable) return null;
+  return g.turn;
+}
+
+/** Touch screens discard on a second tap so a stray touch on a small tile is harmless. */
+const twoTap = (): boolean => window.matchMedia('(pointer: coarse)').matches;
+
+// Which hand slot is raised awaiting a confirming tap: an index into the hand, or 'drawn'.
+let selected: number | 'drawn' | null = null;
+let rerender: () => void = () => {};
+
+function seatHead(g: GameState, engine: Engine, seat: Seat, name: string): HTMLElement {
+  const head = el('div', 'seat-head');
+  head.append(el('span', 'wind', windOf(g, seat)[0]));
+  head.append(el('span', 'who', name));
+  if (seat === g.dealer) head.append(el('span', 'dealer', 'dealer'));
+  if (activeSeat(g, engine) === seat) {
+    const label =
+      engine.pending?.kind === 'claim' ? 'claim?' : seat === HUMAN ? 'your turn' : 'to play';
+    head.append(el('span', 'turn-badge', label));
+  }
+  head.append(el('span', 'pts', fmt(g.players[seat].score)));
+  return head;
+}
+
+function seatBox(g: GameState, engine: Engine, seat: Seat): HTMLElement {
+  const box = el('div', `seat seat-${seat}`);
+  if (activeSeat(g, engine) === seat) box.classList.add('active');
+  return box;
+}
+
 function meldRow(g: GameState, seat: Seat, small: boolean): HTMLElement {
   const wrap = el('div', 'row');
   for (const m of g.players[seat].melds) {
@@ -96,19 +131,17 @@ function discardPile(g: GameState, seat: Seat): HTMLElement {
   return pile;
 }
 
-function opponentSeat(g: GameState, seat: Seat): HTMLElement {
+function opponentSeat(g: GameState, engine: Engine, seat: Seat): HTMLElement {
   const p = g.players[seat];
-  const box = el('div', `seat${g.turn === seat && g.phase !== 'over' ? ' active' : ''}`);
-  const head = el('div', 'seat-head');
-  head.append(el('span', 'who', PLAYER_NAMES[seat]));
-  head.append(el('span', '', windOf(g, seat) + (seat === g.dealer ? ' · dealer' : '')));
-  head.append(el('span', 'pts', fmt(p.score)));
-  box.append(head);
+  const box = seatBox(g, engine, seat);
+  box.append(seatHead(g, engine, seat, PLAYER_NAMES[seat]));
 
   const row = el('div', 'row');
-  const conc = el('div', 'group');
+  const conc = el('div', 'group backs');
   for (let i = 0; i < p.hand.length; i++) conc.append(tileEl(0, { small: true, back: true }));
   row.append(conc);
+  // Stands in for the face-down tiles on narrow screens.
+  row.append(el('span', 'count', `${handOf(g, seat).length} tiles`));
   const melds = meldRow(g, seat, true);
   if (melds.childElementCount) row.append(...Array.from(melds.children));
   box.append(row);
@@ -129,44 +162,55 @@ function chowLabel(start: Tile): string {
 function humanSeat(engine: Engine): HTMLElement {
   const g = engine.state;
   const p = g.players[HUMAN];
-  const box = el('div', `seat${g.turn === HUMAN && g.phase !== 'over' ? ' active' : ''}`);
-  const head = el('div', 'seat-head');
-  head.append(el('span', 'who', 'You'));
-  head.append(el('span', '', windOf(g, HUMAN) + (HUMAN === g.dealer ? ' · dealer' : '')));
-  head.append(el('span', 'pts', fmt(p.score)));
-  box.append(head);
+  const box = seatBox(g, engine, HUMAN);
+  box.classList.add('me');
+  box.append(seatHead(g, engine, HUMAN, 'You'));
 
   const canAct = engine.pending?.kind === 'act';
   const actions = canAct ? selfActions(g, HUMAN) : [];
   const drawn = g.turn === HUMAN ? g.drawn : null;
+  const stale =
+    (selected === 'drawn' && drawn === null) ||
+    (typeof selected === 'number' && selected >= p.hand.length);
+  if (!canAct || stale) selected = null;
+
+  const pick = (slot: number | 'drawn', t: Tile) => (): void => {
+    if (engine.pending?.kind !== 'act') return;
+    if (twoTap() && selected !== slot) {
+      selected = slot;
+      rerender();
+      return;
+    }
+    selected = null;
+    engine.act({ kind: 'discard', tile: t });
+  };
 
   const row = el('div', 'row');
+  const line = el('div', 'hand');
   const conc = el('div', 'group');
-  for (const t of p.hand) {
-    conc.append(
-      tileEl(t, {
-        onClick: canAct ? () => engine.act({ kind: 'discard', tile: t }) : undefined,
-      }),
-    );
-  }
-  row.append(conc);
+  p.hand.forEach((t, i) => {
+    const n = tileEl(t, { onClick: canAct ? pick(i, t) : undefined });
+    if (selected === i) n.classList.add('selected');
+    conc.append(n);
+  });
+  line.append(conc);
   if (drawn !== null) {
-    const d = tileEl(drawn, {
-      onClick: canAct ? () => engine.act({ kind: 'discard', tile: drawn }) : undefined,
-    });
+    const d = tileEl(drawn, { onClick: canAct ? pick('drawn', drawn) : undefined });
     d.classList.add('drawn');
-    row.append(d);
+    if (selected === 'drawn') d.classList.add('selected');
+    line.append(d);
   }
+  row.append(line);
   const melds = meldRow(g, HUMAN, false);
   if (melds.childElementCount) row.append(...Array.from(melds.children));
   box.append(row);
+
+  box.append(actionBar(engine, actions));
 
   if (p.discards.length) {
     box.append(el('div', 'label', 'discards'));
     box.append(discardPile(g, HUMAN));
   }
-
-  box.append(actionBar(engine, actions));
   return box;
 }
 
@@ -182,13 +226,23 @@ function actionBar(engine: Engine, actions: SelfAction[]): HTMLElement {
   };
 
   if (pending?.kind === 'act') {
+    if (selected !== null) {
+      const t = selected === 'drawn' ? g.drawn! : g.players[HUMAN].hand[selected];
+      add(`Discard ${tileName(t)}`, 'primary', () => {
+        selected = null;
+        engine.act({ kind: 'discard', tile: t });
+      });
+    }
     for (const a of actions) {
       if (a.kind === 'win') add('Win', 'primary', () => engine.act(a));
       else if (a.kind === 'concealed-kong')
         add(`Kong ${tileName(a.tile)}`, '', () => engine.act(a));
       else if (a.kind === 'added-kong') add(`Add ${tileName(a.tile)}`, '', () => engine.act(a));
     }
-    if (!bar.childElementCount) bar.append(el('span', 'hint', 'Click a tile to discard.'));
+    if (!bar.childElementCount)
+      bar.append(
+        el('span', 'hint', twoTap() ? 'Tap a tile, tap again to discard.' : 'Click a tile to discard.'),
+      );
   } else if (pending?.kind === 'claim') {
     const order: Record<Claim['kind'], number> = { win: 0, kong: 1, pung: 2, chow: 3 };
     const opts = [...pending.options].sort((a, b) => order[a.kind] - order[b.kind]);
@@ -290,6 +344,7 @@ function overlay(engine: Engine): HTMLElement | null {
 
 export function render(engine: Engine, root: HTMLElement): void {
   const g = engine.state;
+  rerender = () => render(engine, root);
   root.textContent = '';
 
   const top = el('div', 'top');
@@ -308,17 +363,36 @@ export function render(engine: Engine, root: HTMLElement): void {
   root.append(top);
 
   const table = el('div', 'table');
-  table.append(opponentSeat(g, 2));
-  const mid = el('div', 'table');
-  mid.style.gridTemplateColumns = 'minmax(0,1fr) minmax(0,1fr)';
-  mid.append(opponentSeat(g, 3), opponentSeat(g, 1));
-  table.append(mid);
-  table.append(el('div', 'center', statusLine(g, engine)));
-  table.append(humanSeat(engine));
+  const opps = el('div', 'opps');
+  // DOM order is play order after you; wide screens rearrange it into a compass.
+  opps.append(opponentSeat(g, engine, 1), opponentSeat(g, engine, 2), opponentSeat(g, engine, 3));
+  table.append(opps);
+  // Turn order and your hand travel together so both stay in view on a phone.
+  const dock = el('div', 'dock');
+  dock.append(turnBar(g, engine), humanSeat(engine));
+  table.append(dock);
   root.append(table);
 
   const ov = overlay(engine);
   if (ov) root.append(ov);
+}
+
+/** The four seats in play order from the dealer, with the one on the move lit up. */
+function turnBar(g: GameState, engine: Engine): HTMLElement {
+  const bar = el('div', 'center');
+  const active = activeSeat(g, engine);
+  const order = el('div', 'order');
+  for (let i = 0; i < 4; i++) {
+    const seat = ((g.dealer + i) % 4) as Seat;
+    const chip = el('span', `chip${seat === active ? ' on' : ''}${seat === HUMAN ? ' me' : ''}`);
+    chip.append(el('b', '', SEAT_NAMES[i][0]));
+    chip.append(document.createTextNode(PLAYER_NAMES[seat]));
+    order.append(chip);
+  }
+  bar.append(order);
+  const status = el('div', `status${active === HUMAN ? ' mine' : ''}`, statusLine(g, engine));
+  bar.append(status);
+  return bar;
 }
 
 function statusLine(g: GameState, engine: Engine): string {
@@ -326,6 +400,6 @@ function statusLine(g: GameState, engine: Engine): string {
   if (engine.pending?.kind === 'claim') return 'Claim the discard, or pass.';
   if (g.robbable) return `${PLAYER_NAMES[g.robbable.from]} is extending a pung…`;
   if (g.phase === 'claim') return 'Waiting on claims…';
-  if (g.turn === HUMAN) return 'Your turn.';
+  if (g.turn === HUMAN) return 'Your turn — discard a tile.';
   return `${PLAYER_NAMES[g.turn]} is thinking…`;
 }
