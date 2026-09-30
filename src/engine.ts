@@ -31,8 +31,8 @@ export class Engine {
   onUpdate: () => void = () => {};
   private running = false;
 
-  constructor() {
-    this.state = newGame();
+  constructor(state: GameState = newGame()) {
+    this.state = state;
   }
 
   nextHand(): void {
