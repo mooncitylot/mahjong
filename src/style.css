@@ -366,6 +366,18 @@ body {
   margin-bottom: 8px;
 }
 
+.seat-head .avatar {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  margin: -3px -2px -3px 0;
+}
+
+.seat-head .avatar svg {
+  width: 100%;
+  height: 100%;
+}
+
 .seat-head .who {
   color: var(--ink);
   font-weight: 600;

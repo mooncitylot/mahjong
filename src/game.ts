@@ -65,10 +65,24 @@ export interface GameState {
   result: WinSummary | null;
   drawnGame: boolean;
   handNo: number;
+  /** Display name per seat; the human is always 'You'. Kept for the whole game. */
+  names: string[];
 }
 
-/** Table positions, as the human sees them. Seat winds are derived separately. */
-export const PLAYER_NAMES = ['You', 'Right', 'Across', 'Left'] as const;
+const BOT_NAMES = [
+  'Mei', 'Hiro', 'Ana', 'Wei', 'Lena', 'Omar', 'Yuki', 'Ravi', 'Sofia', 'Jin',
+  'Nadia', 'Kofi', 'Ines', 'Theo', 'Priya', 'Lars', 'Amara', 'Diego', 'Hana', 'Felix',
+];
+
+/** 'You' plus three different bot names, drawn at random. */
+export function randomNames(rand: () => number = Math.random): string[] {
+  const pool = BOT_NAMES.slice();
+  const out = ['You'];
+  for (let i = 0; i < 3; i++) out.push(pool.splice(Math.floor(rand() * pool.length), 1)[0]);
+  return out;
+}
+
+export const nameOf = (g: GameState, seat: Seat): string => g.names[seat];
 
 export const HUMAN: Seat = 0;
 
@@ -101,7 +115,13 @@ function countInDiscards(g: GameState, tile: Tile): number {
   return n;
 }
 
-export function newGame(dealer: Seat = 0, prevalentWind = 0, handNo = 1, scores = [0, 0, 0, 0]): GameState {
+export function newGame(
+  dealer: Seat = 0,
+  prevalentWind = 0,
+  handNo = 1,
+  scores = [0, 0, 0, 0],
+  names = randomNames(),
+): GameState {
   const wall = buildWall(Math.random);
   const players: Player[] = ([0, 1, 2, 3] as Seat[]).map((seat) => ({
     seat,
@@ -132,10 +152,11 @@ export function newGame(dealer: Seat = 0, prevalentWind = 0, handNo = 1, scores 
     drawnAfterKong: false,
     lastDiscard: null,
     robbable: null,
-    log: [`Hand ${handNo} — ${WIND_NAMES[prevalentWind]} round, ${PLAYER_NAMES[dealer]} deals.`],
+    log: [`Hand ${handNo} — ${WIND_NAMES[prevalentWind]} round, ${names[dealer]} deals.`],
     result: null,
     drawnGame: false,
     handNo,
+    names,
   };
   draw(g);
   return g;
@@ -319,7 +340,7 @@ export function applySelf(g: GameState, action: SelfAction): void {
     absorb(g);
     take(p.hand, action.tile, 4);
     p.melds.push({ kind: 'kong', tile: action.tile, concealed: true, from: null });
-    g.log.push(`${PLAYER_NAMES[seat]} declares a concealed kong of ${tileName(action.tile)}.`);
+    g.log.push(`${nameOf(g, seat)} declares a concealed kong of ${tileName(action.tile)}.`);
     draw(g, true);
     return;
   }
@@ -329,7 +350,7 @@ export function applySelf(g: GameState, action: SelfAction): void {
     take(p.hand, action.tile, 1);
     const m = p.melds.find((x) => x.kind === 'pung' && x.tile === action.tile)!;
     m.kind = 'kong';
-    g.log.push(`${PLAYER_NAMES[seat]} adds to the pung of ${tileName(action.tile)}.`);
+    g.log.push(`${nameOf(g, seat)} adds to the pung of ${tileName(action.tile)}.`);
     g.robbable = { tile: action.tile, from: seat };
     return; // the caller resolves robbing before the replacement draw
   }
@@ -370,15 +391,15 @@ export function applyClaim(g: GameState, claim: Claim): void {
   if (claim.kind === 'chow') {
     for (const t of [claim.tile, claim.tile + 1, claim.tile + 2]) if (t !== tile) take(p.hand, t);
     p.melds.push({ kind: 'chow', tile: claim.tile, concealed: false, from });
-    g.log.push(`${PLAYER_NAMES[claim.seat]} chows ${tileName(tile)}.`);
+    g.log.push(`${nameOf(g, claim.seat)} chows ${tileName(tile)}.`);
   } else if (claim.kind === 'pung') {
     take(p.hand, tile, 2);
     p.melds.push({ kind: 'pung', tile, concealed: false, from });
-    g.log.push(`${PLAYER_NAMES[claim.seat]} pungs ${tileName(tile)}.`);
+    g.log.push(`${nameOf(g, claim.seat)} pungs ${tileName(tile)}.`);
   } else {
     take(p.hand, tile, 3);
     p.melds.push({ kind: 'kong', tile, concealed: false, from });
-    g.log.push(`${PLAYER_NAMES[claim.seat]} kongs ${tileName(tile)}.`);
+    g.log.push(`${nameOf(g, claim.seat)} kongs ${tileName(tile)}.`);
   }
 
   g.turn = claim.seat;
@@ -423,8 +444,8 @@ function finishWin(
   g.result = { winner, from, tile, fans: r.fans, total: r.total, deltas };
   g.phase = 'over';
   g.log.push(
-    `${PLAYER_NAMES[winner]} wins on ${tileName(tile)} for ${r.total} points${
-      from === null ? ' (self-drawn)' : ` off ${PLAYER_NAMES[from]}`
+    `${nameOf(g, winner)} wins on ${tileName(tile)} for ${r.total} points${
+      from === null ? ' (self-drawn)' : ` off ${nameOf(g, from)}`
     }.`,
   );
 }

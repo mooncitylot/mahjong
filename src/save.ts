@@ -2,7 +2,7 @@ import type { GameState } from './game.js';
 
 // Bump the version whenever GameState changes shape, so an old save is ignored rather than
 // loaded into code that no longer understands it.
-const KEY = 'mahjong:game:v1';
+const KEY = 'mahjong:game:v2';
 
 /** The saved game, or null if there is none or it can't be read. */
 export function loadGame(): GameState | null {
@@ -15,6 +15,8 @@ export function loadGame(): GameState | null {
       Array.isArray(g.players) &&
       g.players.length === 4 &&
       typeof g.handNo === 'number' &&
+      Array.isArray(g.names) &&
+      g.names.length === 4 &&
       (g.phase === 'turn' || g.phase === 'claim' || g.phase === 'over');
     return ok ? g : null;
   } catch {

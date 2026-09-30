@@ -16,13 +16,14 @@ import {
   type Claim,
   type GameState,
   type SelfAction,
-  PLAYER_NAMES,
+  nameOf,
   HUMAN,
   tilesLeft,
   handOf,
   selfActions,
 } from './game.js';
 import { shanten, waits } from './shanten.js';
+import { avatarSvg } from './avatar.js';
 import type { Engine } from './engine.js';
 import { ACCENTS, accent, setAccent, theme, toggleTheme } from './prefs.js';
 
@@ -114,6 +115,11 @@ let rerender: () => void = () => {};
 function seatHead(g: GameState, engine: Engine, seat: Seat, name: string): HTMLElement {
   const head = el('div', 'seat-head');
   head.append(showWind(el('span', 'wind'), seatWind(g, seat)));
+  if (seat !== HUMAN) {
+    const face = el('span', 'avatar');
+    face.innerHTML = avatarSvg(name);
+    head.append(face);
+  }
   head.append(el('span', 'who', name));
   if (seat === g.dealer) head.append(el('span', 'dealer', 'dealer'));
   if (activeSeat(g, engine) === seat) {
@@ -173,7 +179,7 @@ function discardPile(g: GameState, seat: Seat): HTMLElement {
 function opponentSeat(g: GameState, engine: Engine, seat: Seat): HTMLElement {
   const p = g.players[seat];
   const box = seatBox(g, engine, seat);
-  box.append(seatHead(g, engine, seat, PLAYER_NAMES[seat]));
+  box.append(seatHead(g, engine, seat, nameOf(g, seat)));
 
   const row = el('div', 'row');
   const conc = el('div', 'group backs');
@@ -349,12 +355,12 @@ function overlay(engine: Engine): HTMLElement | null {
     card.append(el('div', 'sub', 'The wall ran out. No points change hands.'));
   } else {
     const r = g.result!;
-    card.append(el('h2', '', r.winner === HUMAN ? 'You win' : `${PLAYER_NAMES[r.winner]} wins`));
+    card.append(el('h2', '', r.winner === HUMAN ? 'You win' : `${nameOf(g, r.winner)} wins`));
     card.append(
       el(
         'div',
         'sub',
-        `${tileName(r.tile)} · ${r.from === null ? 'self-drawn' : `discarded by ${PLAYER_NAMES[r.from]}`}`,
+        `${tileName(r.tile)} · ${r.from === null ? 'self-drawn' : `discarded by ${nameOf(g, r.from)}`}`,
       ),
     );
     const fans = el('div', 'fans');
@@ -373,7 +379,7 @@ function overlay(engine: Engine): HTMLElement | null {
     const deltas = el('div', 'deltas');
     for (const s of [0, 1, 2, 3] as Seat[]) {
       const d = el('div');
-      d.append(el('span', '', PLAYER_NAMES[s]));
+      d.append(el('span', '', nameOf(g, s)));
       d.append(el('b', '', fmt(r.deltas[s])));
       deltas.append(d);
     }
@@ -920,7 +926,7 @@ function turnBar(g: GameState, engine: Engine): HTMLElement {
     const chip = el('span', `chip${seat === active ? ' on' : ''}${seat === HUMAN ? ' me' : ''}`);
     chip.dataset.seat = String(seat);
     chip.append(showWind(el('b'), i));
-    chip.append(document.createTextNode(PLAYER_NAMES[seat]));
+    chip.append(document.createTextNode(nameOf(g, seat)));
     order.append(chip);
   }
   bar.append(order);
@@ -932,11 +938,11 @@ function turnBar(g: GameState, engine: Engine): HTMLElement {
 function statusLine(g: GameState, engine: Engine): string {
   if (g.phase === 'over') return '';
   if (engine.pending?.kind === 'claim') return 'Claim the discard, or pass.';
-  if (g.robbable) return `${PLAYER_NAMES[g.robbable.from]} is extending a pung…`;
+  if (g.robbable) return `${nameOf(g, g.robbable.from)} is extending a pung…`;
   if (g.phase === 'claim' && g.lastDiscard) {
     const { from, tile } = g.lastDiscard;
-    return from === HUMAN ? `You discard ${tileName(tile)}.` : `${PLAYER_NAMES[from]} discards ${tileName(tile)}.`;
+    return from === HUMAN ? `You discard ${tileName(tile)}.` : `${nameOf(g, from)} discards ${tileName(tile)}.`;
   }
   if (g.turn === HUMAN) return 'Your turn — discard a tile.';
-  return `${PLAYER_NAMES[g.turn]} is thinking…`;
+  return `${nameOf(g, g.turn)} is thinking…`;
 }

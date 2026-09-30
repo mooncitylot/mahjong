@@ -48,6 +48,7 @@ export class Engine {
       wind,
       handNo,
       g.players.map((p) => p.score),
+      g.names,
     );
     this.pending = null;
     void this.run();
