@@ -41,6 +41,8 @@ interface TileOpts {
   dim?: boolean;
   /** Stable identity across renders, so the tile can be animated from where it was. */
   key?: string;
+  /** Seat the tile belongs to, so a flight can start from that seat's hand. */
+  seat?: Seat;
   onClick?: () => void;
 }
 
@@ -52,6 +54,7 @@ function tileEl(t: Tile, o: TileOpts = {}): HTMLElement {
   if (o.key) {
     node.dataset.k = o.key;
     node.dataset.t = String(t);
+    node.dataset.s = String(o.seat ?? HUMAN);
   }
   if (o.back) {
     return node;
@@ -76,7 +79,10 @@ const windOf = (g: GameState, seat: Seat): string => SEAT_NAMES[(seat - g.dealer
 function activeSeat(g: GameState, engine: Engine): Seat | null {
   if (g.phase === 'over') return null;
   if (engine.pending?.kind === 'claim') return HUMAN;
-  if (g.phase === 'claim' || g.robbable) return null;
+  // Between turns the discarder keeps the light, so it passes straight to the next seat
+  // instead of blinking off while claims are weighed.
+  if (g.robbable) return g.robbable.from;
+  if (g.phase === 'claim') return g.lastDiscard?.from ?? null;
   return g.turn;
 }
 
@@ -94,7 +100,13 @@ function seatHead(g: GameState, engine: Engine, seat: Seat, name: string): HTMLE
   if (seat === g.dealer) head.append(el('span', 'dealer', 'dealer'));
   if (activeSeat(g, engine) === seat) {
     const label =
-      engine.pending?.kind === 'claim' ? 'claim?' : seat === HUMAN ? 'your turn' : 'to play';
+      engine.pending?.kind === 'claim'
+        ? 'claim?'
+        : g.phase === 'claim' || g.robbable
+          ? 'discarded'
+          : seat === HUMAN
+            ? 'your turn'
+            : 'to play';
     head.append(el('span', 'turn-badge', label));
   }
   head.append(el('span', 'pts', fmt(g.players[seat].score)));
@@ -103,6 +115,7 @@ function seatHead(g: GameState, engine: Engine, seat: Seat, name: string): HTMLE
 
 function seatBox(g: GameState, engine: Engine, seat: Seat): HTMLElement {
   const box = el('div', `seat seat-${seat}`);
+  box.dataset.box = String(seat);
   if (activeSeat(g, engine) === seat) box.classList.add('active');
   return box;
 }
@@ -115,7 +128,7 @@ function meldRow(g: GameState, seat: Seat, small: boolean): HTMLElement {
     tiles.forEach((t, i) => {
       // A concealed kong shows its two outer tiles face down.
       const hidden = m.from === null && m.kind === 'kong' && (i === 0 || i === 3);
-      grp.append(tileEl(t, { small, back: hidden, key: `m${g.handNo}-${seat}-${j}-${i}` }));
+      grp.append(tileEl(t, { small, back: hidden, seat, key: `m${g.handNo}-${seat}-${j}-${i}` }));
     });
     wrap.append(grp);
   }
@@ -130,6 +143,7 @@ function discardPile(g: GameState, seat: Seat): HTMLElement {
     pile.append(
       tileEl(t, {
         small: true,
+        seat,
         key: `d${g.handNo}-${seat}-${i}`,
         recent: last !== null && last.from === seat && i === ds.length - 1,
       }),
@@ -145,7 +159,14 @@ function opponentSeat(g: GameState, engine: Engine, seat: Seat): HTMLElement {
 
   const row = el('div', 'row');
   const conc = el('div', 'group backs');
-  for (let i = 0; i < p.hand.length; i++) conc.append(tileEl(0, { small: true, back: true }));
+  // Face-down tiles are keyed by position; -1 keeps them from matching any real tile.
+  const back = (k: string): HTMLElement => tileEl(-1, { small: true, back: true, seat, key: k });
+  for (let i = 0; i < p.hand.length; i++) conc.append(back(`b${g.handNo}-${seat}-${i}`));
+  if (g.turn === seat && g.drawn !== null && g.phase === 'turn') {
+    const d = back(`b${g.handNo}-${seat}-drawn`);
+    d.classList.add('drawn');
+    conc.append(d);
+  }
   row.append(conc);
   // Stands in for the face-down tiles on narrow screens.
   row.append(el('span', 'count', `${handOf(g, seat).length} tiles`));
@@ -401,45 +422,215 @@ export function render(engine: Engine, root: HTMLElement): void {
 //
 // Every update rebuilds the DOM, so nothing would ever transition on its own. Instead each
 // render remembers where keyed tiles sat, then plays the difference: tiles that moved slide
-// (FLIP), tiles that changed hands fly from their old spot, and new tiles ease in.
+// (FLIP), tiles that changed hands arc over from their old spot, and new tiles ease in.
+// Animations still running when the next render lands are carried over to the new nodes,
+// so a quick second update never cuts a flight short.
+
+interface Carry {
+  frames: Keyframe[];
+  timing: KeyframeAnimationOptions;
+  time: number;
+  /** Where the node settles, so a carry only resumes if the layout did not move it. */
+  to: DOMRect;
+}
 
 interface Snap {
   rect: DOMRect;
   t: string;
+  s: string;
+  carry?: Carry;
+}
+
+interface BoxSnap {
+  h: number;
+  carry?: { frames: Keyframe[]; timing: KeyframeAnimationOptions; time: number; to: number };
+}
+
+interface Before {
+  tiles: Map<string, Snap>;
+  boxes: Map<string, BoxSnap>;
+  glide: DOMRect | null;
+  overlay: HTMLElement | null;
 }
 
 const EASE = 'cubic-bezier(0.2, 0.7, 0.3, 1)';
+/** Settles with a small overshoot, for things the player should feel land. */
+const SPRING = 'cubic-bezier(0.3, 1.35, 0.5, 1)';
+
 let lastHandNo = -1;
 let lastActive: Seat | null = null;
 let lastStatus = '';
 let lastPhase = '';
+let lastMelds: string[] = [];
+let lastButtons = '';
 
 const reducedMotion = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-function snapshot(root: HTMLElement): Map<string, Snap> {
-  const m = new Map<string, Snap>();
-  if (reducedMotion()) return m;
-  for (const n of root.querySelectorAll<HTMLElement>('[data-k]'))
-    m.set(n.dataset.k!, { rect: n.getBoundingClientRect(), t: n.dataset.t! });
-  return m;
+const running = new WeakMap<Element, { anim: Animation; frames: Keyframe[]; timing: KeyframeAnimationOptions; to: unknown }>();
+
+function play<T>(n: HTMLElement, frames: Keyframe[], timing: KeyframeAnimationOptions, to: T, time = 0): Animation {
+  const anim = n.animate(frames, timing);
+  if (time) anim.currentTime = time;
+  running.set(n, { anim, frames, timing, to });
+  return anim;
 }
 
+function carryOf(n: Element): { frames: Keyframe[]; timing: KeyframeAnimationOptions; time: number; to: unknown } | undefined {
+  const r = running.get(n);
+  if (!r || r.anim.playState !== 'running') return undefined;
+  return { frames: r.frames, timing: r.timing, time: Number(r.anim.currentTime ?? 0), to: r.to };
+}
+
+function snapshot(root: HTMLElement): Before {
+  const tiles = new Map<string, Snap>();
+  const boxes = new Map<string, BoxSnap>();
+  const g = root.querySelector('.glide');
+  const before: Before = {
+    tiles,
+    boxes,
+    glide: g && g.classList.contains('on') ? g.getBoundingClientRect() : null,
+    overlay: root.querySelector<HTMLElement>('.overlay'),
+  };
+  if (reducedMotion()) return before;
+  for (const n of root.querySelectorAll<HTMLElement>('[data-k]'))
+    tiles.set(n.dataset.k!, {
+      rect: n.getBoundingClientRect(),
+      t: n.dataset.t!,
+      s: n.dataset.s!,
+      carry: carryOf(n) as Carry | undefined,
+    });
+  for (const n of root.querySelectorAll<HTMLElement>('[data-box]'))
+    boxes.set(n.dataset.box!, {
+      h: n.getBoundingClientRect().height,
+      carry: carryOf(n) as BoxSnap['carry'],
+    });
+  return before;
+}
+
+const near = (a: DOMRect, b: DOMRect): boolean =>
+  Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5 && Math.abs(a.width - b.width) < 0.5;
+
+const baseOf = (n: HTMLElement): string => {
+  const b = getComputedStyle(n).transform;
+  return b === 'none' ? '' : ` ${b}`;
+};
+
 /** Offset `n` so it appears at `from`, then let it settle where the layout put it. */
-function slideFrom(n: HTMLElement, from: DOMRect, duration: number, delay = 0): void {
-  const to = n.getBoundingClientRect();
-  const dx = from.left - to.left;
-  const dy = from.top - to.top;
+function slide(n: HTMLElement, from: DOMRect, to: DOMRect, duration: number, easing = EASE): void {
+  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+  const dy = from.top + from.height / 2 - (to.top + to.height / 2);
   const sc = from.width / to.width;
   if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(sc - 1) < 0.01) return;
-  const base = getComputedStyle(n).transform;
-  n.style.transformOrigin = '0 0';
-  n.animate(
-    [{ transform: `translate(${dx}px, ${dy}px) scale(${sc}) ${base === 'none' ? '' : base}` }, {}],
-    { duration, delay, easing: EASE, fill: 'backwards' },
+  const base = baseOf(n);
+  play(
+    n,
+    [{ transform: `translate(${dx}px, ${dy}px) scale(${sc})${base}` }, { transform: base || 'none' }],
+    { duration, easing, fill: 'backwards' },
+    to,
   );
 }
 
-function animate(root: HTMLElement, g: GameState, engine: Engine, before: Map<string, Snap>): void {
+/** Like `slide`, but the tile is tossed: it lifts in an arc, tilts, and lands with a bump. */
+function toss(n: HTMLElement, from: DOMRect, to: DOMRect, duration: number, delay = 0): void {
+  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+  const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+  const sc = from.width / to.width;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 0.5 && Math.abs(sc - 1) < 0.01) return;
+  const arc = Math.min(48, dist * 0.22);
+  const tilt = dx > 0 ? -7 : 7;
+  const mid = ((sc + 1) / 2) * 1.08;
+  const base = baseOf(n);
+  play(
+    n,
+    [
+      { transform: `translate(${dx}px, ${dy}px) scale(${sc})${base}`, easing: 'ease-out' },
+      {
+        offset: 0.45,
+        transform: `translate(${dx * 0.45}px, ${dy * 0.45 - arc}px) scale(${mid}) rotate(${tilt}deg)${base}`,
+        easing: 'ease-in',
+      },
+      { offset: 0.8, transform: `translate(0px, 0px) scale(1.1, 0.92)${base}`, easing: 'ease-out' },
+      { transform: base || 'none' },
+    ],
+    { duration, delay, fill: 'backwards' },
+    to,
+  );
+}
+
+/** Where a seat's concealed hand sits on screen: its face-down row, or its tile count. */
+function handSpot(root: HTMLElement, seat: string): DOMRect | null {
+  const box = root.querySelector(`.seat-${seat}`);
+  if (!box) return null;
+  for (const sel of ['.backs .tile:last-child', '.count', '.seat-head']) {
+    const r = box.querySelector(sel)?.getBoundingClientRect();
+    if (r && r.width > 0) return r;
+  }
+  return null;
+}
+
+let fxLayer: HTMLElement | null = null;
+function fx(): HTMLElement {
+  if (!fxLayer) {
+    fxLayer = el('div', 'fx');
+    document.body.append(fxLayer);
+  }
+  return fxLayer;
+}
+
+/** A word that pops up over a seat — "Pung!" — and drifts away. */
+function callout(root: HTMLElement, seat: Seat, text: string, big = false): void {
+  const box = root.querySelector(`.seat-${seat}`);
+  if (!box) return;
+  const r = box.getBoundingClientRect();
+  const c = el('div', `callout${big ? ' big' : ''}`, text);
+  c.style.left = `${r.left + r.width / 2}px`;
+  c.style.top = `${Math.max(40, Math.min(window.innerHeight - 40, r.top + Math.min(r.height / 2, 60)))}px`;
+  fx().append(c);
+  const anim = c.animate(
+    [
+      { opacity: 0, transform: 'translate(-50%, -50%) scale(0.5)' },
+      { offset: 0.14, opacity: 1, transform: 'translate(-50%, -50%) scale(1.12)' },
+      { offset: 0.24, transform: 'translate(-50%, -50%) scale(1)' },
+      { offset: 0.75, opacity: 1, transform: 'translate(-50%, -75%) scale(1)' },
+      { opacity: 0, transform: 'translate(-50%, -110%) scale(0.96)' },
+    ],
+    { duration: big ? 1300 : 1000, easing: 'ease-out' },
+  );
+  anim.finished.then(() => c.remove(), () => c.remove());
+}
+
+const CALL: Record<string, string> = { chow: 'Chow!', pung: 'Pung!', kong: 'Kong!' };
+
+/** Slide the turn-order highlight under whichever chip is lit. */
+function placeGlide(root: HTMLElement): void {
+  const glide = root.querySelector<HTMLElement>('.glide');
+  const chip = root.querySelector<HTMLElement>('.chip.on');
+  if (!glide) return;
+  glide.classList.toggle('on', chip !== null);
+  if (!chip) return;
+  glide.style.left = `${chip.offsetLeft}px`;
+  glide.style.top = `${chip.offsetTop}px`;
+  glide.style.width = `${chip.offsetWidth}px`;
+  glide.style.height = `${chip.offsetHeight}px`;
+}
+
+function countUp(n: HTMLElement, delay: number): void {
+  const target = Number(n.textContent);
+  if (!Number.isFinite(target) || target === 0) return;
+  const start = performance.now() + delay;
+  const dur = 650;
+  const tick = (now: number): void => {
+    const p = Math.min(1, Math.max(0, (now - start) / dur));
+    const v = Math.round(target * (1 - (1 - p) ** 3));
+    n.textContent = fmt(v);
+    if (p < 1 && n.isConnected) requestAnimationFrame(tick);
+  };
+  n.textContent = fmt(0);
+  requestAnimationFrame(tick);
+}
+
+function animate(root: HTMLElement, g: GameState, engine: Engine, before: Before): void {
   const newHand = g.handNo !== lastHandNo;
   lastHandNo = g.handNo;
   const active = activeSeat(g, engine);
@@ -452,47 +643,107 @@ function animate(root: HTMLElement, g: GameState, engine: Engine, before: Map<st
   lastStatus = status;
   const phaseChanged = g.phase !== lastPhase;
   lastPhase = g.phase;
+  const melds = g.players.map((p) => p.melds.map((m) => m.kind).join(','));
+  const prevMelds = newHand ? melds : lastMelds;
+  lastMelds = melds;
+  const buttons = [...root.querySelectorAll('.seat.me .bar button')].map((b) => b.textContent).join('|');
+  const buttonsChanged = buttons !== lastButtons;
+  lastButtons = buttons;
 
-  if (reducedMotion()) return;
+  placeGlide(root);
+  const motion = !reducedMotion();
 
-  // Tiles that left the table since last render, by value, as sources for flights.
+  // The result card fades out rather than vanishing when the next hand starts.
+  const oldOverlay = before.overlay;
+  if (oldOverlay && !root.querySelector('.overlay') && motion) {
+    fx().append(oldOverlay);
+    oldOverlay
+      .animate([{ opacity: 1 }, { opacity: 0 }], { duration: 260, easing: 'ease-in', fill: 'forwards' })
+      .finished.then(() => oldOverlay.remove(), () => oldOverlay.remove());
+  }
+
+  if (!motion) return;
+
+  // Seats grow and shrink smoothly, so a new row of discards eases the table down instead
+  // of shoving it. Done first: the tile measurements below depend on this layout.
+  if (!newHand) {
+    for (const b of root.querySelectorAll<HTMLElement>('[data-box]')) {
+      const prev = before.boxes.get(b.dataset.box!);
+      if (!prev) continue;
+      const h = b.getBoundingClientRect().height;
+      if (prev.carry && Math.abs(prev.carry.to - h) < 0.5) {
+        play(b, prev.carry.frames, prev.carry.timing, h, prev.carry.time);
+      } else if (Math.abs(prev.h - h) >= 1) {
+        play(b, [{ height: `${prev.h}px` }, { height: `${h}px` }], { duration: 280, easing: EASE }, h);
+      }
+    }
+  }
+
+  // Measure where everything settles before any tile starts moving.
   const nodes = [...root.querySelectorAll<HTMLElement>('[data-k]')];
+  const dest = new Map(nodes.map((n) => [n, n.getBoundingClientRect()]));
   const present = new Set(nodes.map((n) => n.dataset.k!));
+  // Tiles that left the table since last render, as sources for flights.
   const gone: Snap[] = [];
-  if (!newHand) for (const [k, v] of before) if (!present.has(k)) gone.push(v);
+  if (!newHand) for (const [k, v] of before.tiles) if (!present.has(k)) gone.push(v);
+  const take = (pred: (s: Snap) => boolean): Snap | undefined => {
+    const i = gone.findIndex(pred);
+    return i >= 0 ? gone.splice(i, 1)[0] : undefined;
+  };
 
   let dealt = 0;
   for (const n of nodes) {
     const k = n.dataset.k!;
-    const prev = before.get(k);
+    const to = dest.get(n)!;
+    const prev = before.tiles.get(k);
     if (prev) {
-      slideFrom(n, prev.rect, 260);
+      if (prev.carry && near(prev.carry.to, to))
+        play(n, prev.carry.frames, prev.carry.timing, to, prev.carry.time);
+      else slide(n, prev.rect, to, 280, k.startsWith('h') ? SPRING : EASE);
       continue;
     }
-    const src = gone.findIndex((s) => s.t === n.dataset.t);
-    if (src >= 0) {
-      // A discard leaving a hand, or a claimed tile joining a meld.
-      slideFrom(n, gone[src].rect, 340);
-      gone.splice(src, 1);
-    } else if (k.startsWith('h') && newHand) {
-      n.animate([{ opacity: 0, transform: 'translateY(-14px)' }, {}], {
-        duration: 320,
-        delay: dealt++ * 35,
-        easing: EASE,
-        fill: 'backwards',
-      });
-    } else if (k.startsWith('h')) {
-      // Freshly drawn.
-      n.animate([{ opacity: 0, transform: 'translateY(-18px)' }, {}], { duration: 300, easing: EASE });
-    } else if (k.startsWith('d')) {
-      n.animate([{ opacity: 0, transform: 'translateY(-10px) scale(1.25)' }, {}], {
-        duration: 300,
-        easing: EASE,
-      });
+    // A discard leaving a hand, or a claimed tile joining a meld.
+    const byValue = n.dataset.t !== '-1' ? take((s) => s.t === n.dataset.t) : undefined;
+    if (byValue) {
+      toss(n, byValue.rect, to, 440);
+      continue;
+    }
+    // An opponent's tile, out of their face-down hand.
+    if (!newHand && (k.startsWith('d') || k.startsWith('m')) && n.dataset.s !== String(HUMAN)) {
+      const back = take((s) => s.t === '-1' && s.s === n.dataset.s);
+      const from = back?.rect ?? handSpot(root, n.dataset.s!);
+      if (from) {
+        toss(n, from, to, 440);
+        continue;
+      }
+    }
+    if (newHand && (k.startsWith('h') || k.startsWith('b'))) {
+      play(
+        n,
+        [{ opacity: 0, transform: 'translateY(-18px) rotate(-6deg) scale(0.9)' }, {}],
+        { duration: 360, delay: (k.startsWith('h') ? dealt++ : dealt * 0.5) * 32, easing: SPRING, fill: 'backwards' },
+        to,
+      );
+    } else if (k.startsWith('h') || k.startsWith('b')) {
+      // Freshly drawn: dropped in from the wall.
+      play(
+        n,
+        [{ opacity: 0, transform: 'translateY(-26px) rotate(4deg)' }, { opacity: 1, offset: 0.4 }, { transform: baseOf(n) || 'none' }],
+        { duration: 420, easing: SPRING, fill: 'backwards' },
+        to,
+      );
     } else {
-      n.animate([{ opacity: 0, transform: 'scale(0.7)' }, {}], { duration: 280, easing: EASE });
+      play(n, [{ opacity: 0, transform: 'scale(0.6)' }, {}], { duration: 300, easing: SPRING }, to);
     }
   }
+
+  if (!newHand)
+    for (const s of [0, 1, 2, 3] as Seat[]) {
+      if (melds[s] === prevMelds[s]) continue;
+      const kind = g.players[s].melds.at(-1)?.kind;
+      const grew = melds[s].split(',').length > prevMelds[s].split(',').length || !prevMelds[s];
+      callout(root, s, CALL[grew && kind ? kind : 'kong']);
+    }
 
   if (turnChanged) {
     if (active !== null) {
@@ -501,9 +752,43 @@ function animate(root: HTMLElement, g: GameState, engine: Engine, before: Map<st
     }
     if (prevActive !== null && prevActive !== active)
       root.querySelector(`.seat-${prevActive}`)?.classList.add('turn-out');
+    const glide = root.querySelector<HTMLElement>('.glide.on');
+    if (glide && before.glide) slide(glide, before.glide, glide.getBoundingClientRect(), 380, SPRING);
+    else glide?.animate([{ opacity: 0, transform: 'scale(0.8)' }, {}], { duration: 260, easing: SPRING });
   }
   if (statusChanged) statusNode?.classList.add('fade-in');
-  if (phaseChanged) root.querySelector('.overlay')?.classList.add('show');
+
+  if (buttonsChanged)
+    root.querySelectorAll<HTMLElement>('.seat.me .bar button').forEach((b, i) =>
+      b.animate([{ opacity: 0, transform: 'translateY(6px) scale(0.9)' }, {}], {
+        duration: 300,
+        delay: i * 45,
+        easing: SPRING,
+        fill: 'backwards',
+      }),
+    );
+
+  if (phaseChanged && g.phase === 'over') {
+    const ov = root.querySelector<HTMLElement>('.overlay');
+    // Give a win its moment on the table before the scorecard covers it.
+    const hold = g.result ? 650 : 0;
+    if (g.result) callout(root, g.result.winner, g.result.winner === HUMAN ? 'Mahjong!' : 'Mahjong', true);
+    if (ov) {
+      ov.classList.add('show');
+      ov.style.setProperty('--hold', `${hold}ms`);
+      const lines = [...ov.querySelectorAll<HTMLElement>('.fan')];
+      lines.forEach((l, i) =>
+        l.animate([{ opacity: 0, transform: 'translateX(-8px)' }, {}], {
+          duration: 260,
+          delay: hold + 220 + i * 60,
+          easing: EASE,
+          fill: 'backwards',
+        }),
+      );
+      const after = hold + 260 + lines.length * 60;
+      ov.querySelectorAll<HTMLElement>('.deltas b').forEach((b) => countUp(b, after));
+    }
+  }
 }
 
 /** The four seats in play order from the dealer, with the one on the move lit up. */
@@ -511,6 +796,7 @@ function turnBar(g: GameState, engine: Engine): HTMLElement {
   const bar = el('div', 'center');
   const active = activeSeat(g, engine);
   const order = el('div', 'order');
+  order.append(el('span', 'glide'));
   for (let i = 0; i < 4; i++) {
     const seat = ((g.dealer + i) % 4) as Seat;
     const chip = el('span', `chip${seat === active ? ' on' : ''}${seat === HUMAN ? ' me' : ''}`);
@@ -529,7 +815,10 @@ function statusLine(g: GameState, engine: Engine): string {
   if (g.phase === 'over') return '';
   if (engine.pending?.kind === 'claim') return 'Claim the discard, or pass.';
   if (g.robbable) return `${PLAYER_NAMES[g.robbable.from]} is extending a pung…`;
-  if (g.phase === 'claim') return 'Waiting on claims…';
+  if (g.phase === 'claim' && g.lastDiscard) {
+    const { from, tile } = g.lastDiscard;
+    return from === HUMAN ? `You discard ${tileName(tile)}.` : `${PLAYER_NAMES[from]} discards ${tileName(tile)}.`;
+  }
   if (g.turn === HUMAN) return 'Your turn — discard a tile.';
   return `${PLAYER_NAMES[g.turn]} is thinking…`;
 }

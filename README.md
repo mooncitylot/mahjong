@@ -1,7 +1,7 @@
 # Mahjong
 
 Single-player mahjong against three bots, under Mahjong Competition Rules.
-Vanilla TypeScript, no runtime dependencies, ~35 kB of JavaScript.
+Vanilla TypeScript, no runtime dependencies, ~45 kB of JavaScript.
 
 ```sh
 npm install
@@ -54,10 +54,18 @@ turn-order strip lights the same seat.
 ## Motion
 
 The UI rebuilds the DOM on every update, so `ui.ts` keys each tile and animates
-the difference between renders: tiles that moved slide into place, your discard
-flies from your hand to the pile, claimed tiles fly into the new meld, bot
-discards drop in, and a new hand deals in with a stagger. Turn changes, the
-status line, and the result card fade. All of it switches off under
+the difference between renders. Tiles that moved slide into place (your hand
+re-sorts with a little spring); a discard is tossed in an arc from the hand —
+yours or a bot's face-down row — and lands in the pile with a bump; claimed
+tiles arc into the new meld; draws drop in; a new hand deals in with a stagger.
+Seats grow and shrink smoothly as piles wrap, so the table never jumps.
+
+Updates are drawn at most once per frame, and animations still running when
+the next render lands are carried over, so flights are never cut short. The
+turn highlight passes straight from the discarder to the next seat, with a pill
+gliding along the turn-order strip. Claims pop a "Pung!"/"Chow!"/"Kong!" over
+the seat; a win gets a beat on the table before the scorecard slides in, whose
+lines stagger and payments count up. All of it switches off under
 `prefers-reduced-motion`.
 
 ## Layout

@@ -13,6 +13,7 @@
   --blue: #3a5a8c;
   --turn: #c47a12;
   --turn-soft: rgba(196, 122, 18, 0.1);
+  --turn-bg: #f6ede1;
   --tile-w: 34px;
   --tile-h: 46px;
   --r: 5px;
@@ -34,6 +35,7 @@
     --blue: #7ba0d4;
     --turn: #e6a84a;
     --turn-soft: rgba(230, 168, 74, 0.1);
+    --turn-bg: #2f281c;
   }
 }
 
@@ -150,7 +152,7 @@ body {
 
 .seat.active {
   border-color: var(--turn);
-  background: color-mix(in srgb, var(--turn-soft) 100%, var(--panel));
+  background: var(--turn-bg);
   box-shadow:
     0 0 0 1px var(--turn),
     0 4px 18px var(--turn-soft);
@@ -343,8 +345,8 @@ body {
 .tile.pick {
   cursor: pointer;
   transition:
-    transform 0.09s ease,
-    box-shadow 0.09s ease;
+    transform 0.22s cubic-bezier(0.3, 1.6, 0.5, 1),
+    box-shadow 0.22s ease;
 }
 
 @media (hover: hover) {
@@ -352,6 +354,11 @@ body {
     transform: translateY(-5px);
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.13);
   }
+}
+
+.tile.pick:active {
+  transform: translateY(-3px) scale(0.96);
+  transition-duration: 0.08s;
 }
 
 .tile.selected {
@@ -362,6 +369,10 @@ body {
 
 .tile.drawn {
   margin-left: 10px;
+}
+
+.backs .tile.drawn {
+  margin-left: 6px;
 }
 
 .tile.recent {
@@ -387,6 +398,7 @@ body {
 }
 
 .order {
+  position: relative;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -416,9 +428,26 @@ body {
   font-size: 10px;
 }
 
+/* The lit chip's fill is a separate pill that glides from seat to seat. */
+.chip {
+  position: relative;
+  z-index: 1;
+}
+
+.glide {
+  position: absolute;
+  border-radius: 999px;
+  background: var(--turn);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.glide.on {
+  opacity: 1;
+}
+
 .chip.on {
   border-color: var(--turn);
-  background: var(--turn);
   color: var(--bg);
   font-weight: 600;
 }
@@ -448,6 +477,10 @@ body {
 }
 
 button.act {
+  transition:
+    transform 0.15s cubic-bezier(0.3, 1.6, 0.5, 1),
+    background-color 0.15s ease,
+    border-color 0.15s ease;
   font: inherit;
   font-size: 12px;
   letter-spacing: 0.06em;
@@ -463,6 +496,10 @@ button.act {
 button.act:hover {
   background: var(--panel);
   border-color: var(--ink);
+}
+
+button.act:active {
+  transform: scale(0.95);
 }
 
 button.act.primary {
@@ -604,7 +641,7 @@ button.act.ghost {
 @keyframes turn-out {
   from {
     border-color: var(--turn);
-    background-color: color-mix(in srgb, var(--turn-soft) 100%, var(--panel));
+    background-color: var(--turn-bg);
     box-shadow: 0 0 0 1px var(--turn);
   }
 }
@@ -624,8 +661,6 @@ button.act.ghost {
 
 @keyframes chip-in {
   from {
-    background: transparent;
-    border-color: var(--line-soft);
     color: var(--muted);
   }
 }
@@ -638,11 +673,11 @@ button.act.ghost {
 }
 
 .overlay.show {
-  animation: overlay-in 0.35s ease-out;
+  animation: overlay-in 0.35s ease-out var(--hold, 0ms) backwards;
 }
 
 .overlay.show .card {
-  animation: card-in 0.4s cubic-bezier(0.2, 0.7, 0.3, 1);
+  animation: card-in 0.5s cubic-bezier(0.3, 1.35, 0.5, 1) var(--hold, 0ms) backwards;
 }
 
 @keyframes overlay-in {
@@ -654,8 +689,46 @@ button.act.ghost {
 @keyframes card-in {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.98);
+    transform: translateY(18px) scale(0.96);
   }
+}
+
+.tile.recent {
+  animation: recent 1.6s ease-in-out 0.45s infinite;
+}
+
+@keyframes recent {
+  50% {
+    outline-offset: 3px;
+    outline-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+}
+
+/* Floating words over the table ("Pung!") and the fading result card live here, outside
+   the app root that is rebuilt on every update. */
+.fx {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.callout {
+  position: absolute;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--turn);
+  color: var(--bg);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.callout.big {
+  padding: 10px 22px;
+  font-size: 22px;
 }
 
 @media (prefers-reduced-motion: reduce) {
