@@ -24,7 +24,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 export class Engine {
   state: GameState;
   pending: Pending = null;
-  speed = 550;
+  speed = 700;
   onUpdate: () => void = () => {};
   private running = false;
 

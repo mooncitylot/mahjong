@@ -206,12 +206,6 @@ body {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .turn-badge::before {
-    animation: none;
-  }
-}
-
 .count {
   display: none;
   font-size: 11px;
@@ -587,6 +581,89 @@ button.act.ghost {
 
 .log div {
   padding: 1px 0;
+}
+
+/* ---------- motion ---------- */
+
+.seat.turn-in {
+  animation: turn-in 0.4s ease-out;
+}
+
+@keyframes turn-in {
+  from {
+    border-color: var(--line-soft);
+    background-color: var(--panel);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.seat.turn-out {
+  animation: turn-out 0.45s ease-out;
+}
+
+@keyframes turn-out {
+  from {
+    border-color: var(--turn);
+    background-color: color-mix(in srgb, var(--turn-soft) 100%, var(--panel));
+    box-shadow: 0 0 0 1px var(--turn);
+  }
+}
+
+.turn-in .turn-badge,
+.status.fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+.chip {
+  transition: none;
+}
+
+.chip.turn-in {
+  animation: chip-in 0.35s ease-out;
+}
+
+@keyframes chip-in {
+  from {
+    background: transparent;
+    border-color: var(--line-soft);
+    color: var(--muted);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.overlay.show {
+  animation: overlay-in 0.35s ease-out;
+}
+
+.overlay.show .card {
+  animation: card-in 0.4s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* ---------- portrait phones ---------- */

@@ -51,6 +51,15 @@ throws it, so a stray touch never discards.
 The seat on the move is outlined in amber with a pulsing badge, and the
 turn-order strip lights the same seat.
 
+## Motion
+
+The UI rebuilds the DOM on every update, so `ui.ts` keys each tile and animates
+the difference between renders: tiles that moved slide into place, your discard
+flies from your hand to the pile, claimed tiles fly into the new meld, bot
+discards drop in, and a new hand deals in with a stagger. Turn changes, the
+status line, and the result card fade. All of it switches off under
+`prefers-reduced-motion`.
+
 ## Layout
 
 | File | Role |

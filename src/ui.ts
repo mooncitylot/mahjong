@@ -39,6 +39,8 @@ interface TileOpts {
   back?: boolean;
   recent?: boolean;
   dim?: boolean;
+  /** Stable identity across renders, so the tile can be animated from where it was. */
+  key?: string;
   onClick?: () => void;
 }
 
@@ -47,6 +49,10 @@ function tileEl(t: Tile, o: TileOpts = {}): HTMLElement {
   node.className = ['tile', o.small ? 'sm' : '', o.back ? 'back' : tileClass(t)]
     .filter(Boolean)
     .join(' ');
+  if (o.key) {
+    node.dataset.k = o.key;
+    node.dataset.t = String(t);
+  }
   if (o.back) {
     return node;
   }
@@ -103,13 +109,13 @@ function seatBox(g: GameState, engine: Engine, seat: Seat): HTMLElement {
 
 function meldRow(g: GameState, seat: Seat, small: boolean): HTMLElement {
   const wrap = el('div', 'row');
-  for (const m of g.players[seat].melds) {
+  for (const [j, m] of g.players[seat].melds.entries()) {
     const grp = el('div', 'group');
     const tiles = setTiles(m);
     tiles.forEach((t, i) => {
       // A concealed kong shows its two outer tiles face down.
       const hidden = m.from === null && m.kind === 'kong' && (i === 0 || i === 3);
-      grp.append(tileEl(t, { small, back: hidden }));
+      grp.append(tileEl(t, { small, back: hidden, key: `m${g.handNo}-${seat}-${j}-${i}` }));
     });
     wrap.append(grp);
   }
@@ -124,6 +130,7 @@ function discardPile(g: GameState, seat: Seat): HTMLElement {
     pile.append(
       tileEl(t, {
         small: true,
+        key: `d${g.handNo}-${seat}-${i}`,
         recent: last !== null && last.from === seat && i === ds.length - 1,
       }),
     ),
@@ -188,14 +195,24 @@ function humanSeat(engine: Engine): HTMLElement {
   const row = el('div', 'row');
   const line = el('div', 'hand');
   const conc = el('div', 'group');
+  // Keyed by value and copy number, so a tile keeps its identity as the hand re-sorts.
+  const copies = new Map<Tile, number>();
+  const handKey = (t: Tile): string => {
+    const n = copies.get(t) ?? 0;
+    copies.set(t, n + 1);
+    return `h${g.handNo}-${t}#${n}`;
+  };
   p.hand.forEach((t, i) => {
-    const n = tileEl(t, { onClick: canAct ? pick(i, t) : undefined });
+    const n = tileEl(t, { key: handKey(t), onClick: canAct ? pick(i, t) : undefined });
     if (selected === i) n.classList.add('selected');
     conc.append(n);
   });
   line.append(conc);
   if (drawn !== null) {
-    const d = tileEl(drawn, { onClick: canAct ? pick('drawn', drawn) : undefined });
+    const d = tileEl(drawn, {
+      key: handKey(drawn),
+      onClick: canAct ? pick('drawn', drawn) : undefined,
+    });
     d.classList.add('drawn');
     if (selected === 'drawn') d.classList.add('selected');
     line.append(d);
@@ -345,6 +362,7 @@ function overlay(engine: Engine): HTMLElement | null {
 export function render(engine: Engine, root: HTMLElement): void {
   const g = engine.state;
   rerender = () => render(engine, root);
+  const before = snapshot(root);
   root.textContent = '';
 
   const top = el('div', 'top');
@@ -375,6 +393,117 @@ export function render(engine: Engine, root: HTMLElement): void {
 
   const ov = overlay(engine);
   if (ov) root.append(ov);
+
+  animate(root, g, engine, before);
+}
+
+// ---------- motion ----------
+//
+// Every update rebuilds the DOM, so nothing would ever transition on its own. Instead each
+// render remembers where keyed tiles sat, then plays the difference: tiles that moved slide
+// (FLIP), tiles that changed hands fly from their old spot, and new tiles ease in.
+
+interface Snap {
+  rect: DOMRect;
+  t: string;
+}
+
+const EASE = 'cubic-bezier(0.2, 0.7, 0.3, 1)';
+let lastHandNo = -1;
+let lastActive: Seat | null = null;
+let lastStatus = '';
+let lastPhase = '';
+
+const reducedMotion = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function snapshot(root: HTMLElement): Map<string, Snap> {
+  const m = new Map<string, Snap>();
+  if (reducedMotion()) return m;
+  for (const n of root.querySelectorAll<HTMLElement>('[data-k]'))
+    m.set(n.dataset.k!, { rect: n.getBoundingClientRect(), t: n.dataset.t! });
+  return m;
+}
+
+/** Offset `n` so it appears at `from`, then let it settle where the layout put it. */
+function slideFrom(n: HTMLElement, from: DOMRect, duration: number, delay = 0): void {
+  const to = n.getBoundingClientRect();
+  const dx = from.left - to.left;
+  const dy = from.top - to.top;
+  const sc = from.width / to.width;
+  if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(sc - 1) < 0.01) return;
+  const base = getComputedStyle(n).transform;
+  n.style.transformOrigin = '0 0';
+  n.animate(
+    [{ transform: `translate(${dx}px, ${dy}px) scale(${sc}) ${base === 'none' ? '' : base}` }, {}],
+    { duration, delay, easing: EASE, fill: 'backwards' },
+  );
+}
+
+function animate(root: HTMLElement, g: GameState, engine: Engine, before: Map<string, Snap>): void {
+  const newHand = g.handNo !== lastHandNo;
+  lastHandNo = g.handNo;
+  const active = activeSeat(g, engine);
+  const turnChanged = active !== lastActive;
+  const prevActive = lastActive;
+  lastActive = active;
+  const statusNode = root.querySelector<HTMLElement>('.center .status');
+  const status = statusNode?.textContent ?? '';
+  const statusChanged = status !== lastStatus;
+  lastStatus = status;
+  const phaseChanged = g.phase !== lastPhase;
+  lastPhase = g.phase;
+
+  if (reducedMotion()) return;
+
+  // Tiles that left the table since last render, by value, as sources for flights.
+  const nodes = [...root.querySelectorAll<HTMLElement>('[data-k]')];
+  const present = new Set(nodes.map((n) => n.dataset.k!));
+  const gone: Snap[] = [];
+  if (!newHand) for (const [k, v] of before) if (!present.has(k)) gone.push(v);
+
+  let dealt = 0;
+  for (const n of nodes) {
+    const k = n.dataset.k!;
+    const prev = before.get(k);
+    if (prev) {
+      slideFrom(n, prev.rect, 260);
+      continue;
+    }
+    const src = gone.findIndex((s) => s.t === n.dataset.t);
+    if (src >= 0) {
+      // A discard leaving a hand, or a claimed tile joining a meld.
+      slideFrom(n, gone[src].rect, 340);
+      gone.splice(src, 1);
+    } else if (k.startsWith('h') && newHand) {
+      n.animate([{ opacity: 0, transform: 'translateY(-14px)' }, {}], {
+        duration: 320,
+        delay: dealt++ * 35,
+        easing: EASE,
+        fill: 'backwards',
+      });
+    } else if (k.startsWith('h')) {
+      // Freshly drawn.
+      n.animate([{ opacity: 0, transform: 'translateY(-18px)' }, {}], { duration: 300, easing: EASE });
+    } else if (k.startsWith('d')) {
+      n.animate([{ opacity: 0, transform: 'translateY(-10px) scale(1.25)' }, {}], {
+        duration: 300,
+        easing: EASE,
+      });
+    } else {
+      n.animate([{ opacity: 0, transform: 'scale(0.7)' }, {}], { duration: 280, easing: EASE });
+    }
+  }
+
+  if (turnChanged) {
+    if (active !== null) {
+      root.querySelector(`.seat-${active}`)?.classList.add('turn-in');
+      root.querySelector(`.chip[data-seat="${active}"]`)?.classList.add('turn-in');
+    }
+    if (prevActive !== null && prevActive !== active)
+      root.querySelector(`.seat-${prevActive}`)?.classList.add('turn-out');
+  }
+  if (statusChanged) statusNode?.classList.add('fade-in');
+  if (phaseChanged) root.querySelector('.overlay')?.classList.add('show');
 }
 
 /** The four seats in play order from the dealer, with the one on the move lit up. */
@@ -385,6 +514,7 @@ function turnBar(g: GameState, engine: Engine): HTMLElement {
   for (let i = 0; i < 4; i++) {
     const seat = ((g.dealer + i) % 4) as Seat;
     const chip = el('span', `chip${seat === active ? ' on' : ''}${seat === HUMAN ? ' me' : ''}`);
+    chip.dataset.seat = String(seat);
     chip.append(el('b', '', SEAT_NAMES[i][0]));
     chip.append(document.createTextNode(PLAYER_NAMES[seat]));
     order.append(chip);
