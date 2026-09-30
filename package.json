@@ -12,6 +12,7 @@
     "sim": "tsx test/sim.test.ts"
   },
   "devDependencies": {
+    "@types/node": "^26.6.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.7"
