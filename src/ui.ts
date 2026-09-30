@@ -2,6 +2,7 @@ import {
   type Tile,
   type Seat,
   SEAT_NAMES,
+  seatWindTile,
   isHonor,
   tileFace,
   tileMark,
@@ -22,6 +23,7 @@ import {
 } from './game.js';
 import { shanten, waits } from './shanten.js';
 import type { Engine } from './engine.js';
+import { ACCENTS, accent, setAccent, theme, toggleTheme } from './prefs.js';
 
 const el = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -73,7 +75,15 @@ function tileEl(t: Tile, o: TileOpts = {}): HTMLElement {
   return node;
 }
 
-const windOf = (g: GameState, seat: Seat): string => SEAT_NAMES[(seat - g.dealer + 4) % 4];
+/** A seat's own wind, counted from the dealer (0 = East). */
+const seatWind = (g: GameState, seat: Seat): number => (seat - g.dealer + 4) % 4;
+
+/** Fill `n` with a wind as it appears on its tile (東 南 西 北), named on hover. */
+const showWind = <T extends HTMLElement>(n: T, wind: number): T => {
+  n.textContent = tileFace(seatWindTile(wind as Seat));
+  n.title = SEAT_NAMES[wind];
+  return n;
+};
 
 /** Seat whose move the table is waiting on, or null between hands. */
 function activeSeat(g: GameState, engine: Engine): Seat | null {
@@ -95,7 +105,7 @@ let rerender: () => void = () => {};
 
 function seatHead(g: GameState, engine: Engine, seat: Seat, name: string): HTMLElement {
   const head = el('div', 'seat-head');
-  head.append(el('span', 'wind', windOf(g, seat)[0]));
+  head.append(showWind(el('span', 'wind'), seatWind(g, seat)));
   head.append(el('span', 'who', name));
   if (seat === g.dealer) head.append(el('span', 'dealer', 'dealer'));
   if (activeSeat(g, engine) === seat) {
@@ -380,6 +390,102 @@ function overlay(engine: Engine): HTMLElement | null {
   return wrap;
 }
 
+// The display menu's open state lives here, not in the DOM, because every game update
+// rebuilds the header.
+let prefsOpen = false;
+
+const setPrefsOpen = (open: boolean): void => {
+  if (open === prefsOpen) return;
+  prefsOpen = open;
+  rerender();
+};
+
+document.addEventListener('click', (e) => {
+  if (prefsOpen && !(e.target as Element).closest('.prefs')) setPrefsOpen(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') setPrefsOpen(false);
+});
+
+const SLIDERS_ICON =
+  '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">' +
+  '<path d="M2 4h7M13 4h1M2 12h1M7 12h7"/><circle cx="11" cy="4" r="2"/><circle cx="5" cy="12" r="2"/></svg>';
+
+function prefsMenu(): HTMLElement {
+  const wrap = el('div', 'prefs');
+  const btn = el('button', `prefs-btn${prefsOpen ? ' on' : ''}`);
+  btn.innerHTML = SLIDERS_ICON;
+  btn.title = 'Display settings';
+  btn.setAttribute('aria-label', btn.title);
+  btn.setAttribute('aria-expanded', String(prefsOpen));
+  btn.addEventListener('click', () => setPrefsOpen(!prefsOpen));
+  wrap.append(btn);
+  if (!prefsOpen) return wrap;
+
+  const panel = el('div', 'prefs-panel');
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', 'Display settings');
+
+  panel.append(el('div', 'label', 'Accent'));
+  const swatches = el('div', 'swatches');
+  const current = accent();
+  for (const a of ACCENTS) {
+    const b = el('button', `swatch${a === current ? ' on' : ''}`);
+    b.dataset.accent = a;
+    b.title = `${a[0].toUpperCase()}${a.slice(1)}`;
+    b.setAttribute('aria-label', `${b.title} accent`);
+    b.setAttribute('aria-pressed', String(a === current));
+    b.addEventListener('click', () => {
+      setAccent(a);
+      rerender();
+    });
+    swatches.append(b);
+  }
+  panel.append(swatches);
+
+  panel.append(el('div', 'label', 'Theme'));
+  const seg = el('div', 'seg');
+  const now = theme();
+  for (const t of ['light', 'dark'] as const) {
+    const b = el('button', t === now ? 'on' : '', t === 'light' ? 'Light' : 'Dark');
+    b.setAttribute('aria-pressed', String(t === now));
+    b.addEventListener('click', () => {
+      if (t !== theme()) toggleTheme();
+      rerender();
+    });
+    seg.append(b);
+  }
+  panel.append(seg);
+
+  wrap.append(panel);
+  return wrap;
+}
+
+const LAST_TILES = 12;
+
+/**
+ * The wall as a row of two-high stacks. Draws eat it from the left and kong replacements
+ * from the right, the same ends the engine takes them from.
+ */
+
+function wallStrip(g: GameState): HTMLElement {
+  const left = Math.max(0, tilesLeft(g));
+  const strip = el('div', 'wall');
+  strip.title = `${left} tiles left in the wall`;
+  strip.setAttribute('role', 'img');
+  strip.setAttribute('aria-label', strip.title);
+  for (let i = 0; i < g.wall.length; i += 2) {
+    const stack = el('span', 'stack');
+    for (const j of [i, i + 1]) {
+      // The last dozen tiles still to come are tinted, so the end of the hand shows ahead of time.
+      const cls = j < g.head || j > g.tail ? '' : j > g.tail - LAST_TILES ? 'in end' : 'in';
+      stack.append(el('i', cls));
+    }
+    strip.append(stack);
+  }
+  return strip;
+}
+
 export function render(engine: Engine, root: HTMLElement): void {
   const g = engine.state;
   rerender = () => render(engine, root);
@@ -387,7 +493,10 @@ export function render(engine: Engine, root: HTMLElement): void {
   root.textContent = '';
 
   const top = el('div', 'top');
-  top.append(el('div', 'brand', 'Mahjong · MCR'));
+  const brand = el('div', 'brand', '麻将');
+  brand.lang = 'zh-Hans';
+  brand.title = 'Mahjong';
+  top.append(brand);
   const meta = el('div', 'meta');
   const item = (k: string, v: string): HTMLElement => {
     const s = el('span', '', `${k} `);
@@ -395,10 +504,11 @@ export function render(engine: Engine, root: HTMLElement): void {
     return s;
   };
   meta.append(item('Hand', String(g.handNo)));
-  meta.append(item('Round', SEAT_NAMES[g.prevalentWind]));
-  meta.append(item('Wall', String(Math.max(0, tilesLeft(g)))));
-  meta.append(item('Min', '8 pts'));
-  top.append(meta);
+  // The prevalent wind as it appears on its tile, e.g. 東.
+  const round = item('Round', tileFace(seatWindTile(g.prevalentWind as Seat)));
+  round.title = `${SEAT_NAMES[g.prevalentWind]} round`;
+  meta.append(round);
+  top.append(meta, prefsMenu(), wallStrip(g));
   root.append(top);
 
   const table = el('div', 'table');
@@ -801,7 +911,7 @@ function turnBar(g: GameState, engine: Engine): HTMLElement {
     const seat = ((g.dealer + i) % 4) as Seat;
     const chip = el('span', `chip${seat === active ? ' on' : ''}${seat === HUMAN ? ' me' : ''}`);
     chip.dataset.seat = String(seat);
-    chip.append(el('b', '', SEAT_NAMES[i][0]));
+    chip.append(showWind(el('b'), i));
     chip.append(document.createTextNode(PLAYER_NAMES[seat]));
     order.append(chip);
   }

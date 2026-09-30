@@ -4,6 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Mahjong</title>
+    <script>
+      // Apply saved look-and-feel before first paint so the page never flashes the default.
+      try {
+        const p = JSON.parse(localStorage.getItem('mahjong:prefs') || '{}');
+        if (p.accent) document.documentElement.dataset.accent = p.accent;
+        if (p.theme) document.documentElement.dataset.theme = p.theme;
+      } catch {}
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600&display=swap"
+    />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>

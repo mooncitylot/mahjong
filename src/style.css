@@ -1,42 +1,60 @@
 :root {
-  --bg: #f4f2ee;
-  --panel: #fbfaf8;
-  --face: #ffffff;
-  --back: #ded9d0;
-  --line: rgba(20, 18, 14, 0.14);
-  --line-soft: rgba(20, 18, 14, 0.07);
-  --ink: #1b1915;
-  --muted: #7d7669;
-  --accent: #1b1915;
-  --red: #b23a33;
-  --green: #3f7350;
-  --blue: #3a5a8c;
-  --turn: #c47a12;
-  --turn-soft: rgba(196, 122, 18, 0.1);
-  --turn-bg: #f6ede1;
+  /* Follows the OS unless the player picks a theme (see prefs.ts). */
+  color-scheme: light dark;
+  --bg: light-dark(#f4f2ee, #131210);
+  --panel: light-dark(#fbfaf8, #1b1a17);
+  --face: light-dark(#ffffff, #24221e);
+  --back: light-dark(#ded9d0, #2e2b26);
+  --line: light-dark(rgba(20, 18, 14, 0.14), rgba(240, 236, 228, 0.16));
+  --line-soft: light-dark(rgba(20, 18, 14, 0.07), rgba(240, 236, 228, 0.08));
+  --ink: light-dark(#1b1915, #eae5dc);
+  --muted: light-dark(#7d7669, #8d867a);
+  --accent: light-dark(#1b1915, #eae5dc);
+  --red: light-dark(#b23a33, #d9736a);
+  --green: light-dark(#3f7350, #74a682);
+  --blue: light-dark(#3a5a8c, #7ba0d4);
+  /* The player's accent colour: the active turn, the drawn tile, badges. */
+  --turn: light-dark(#c47a12, #e6a84a);
+  --turn-bg: light-dark(#f6ede1, #2f281c);
+  --turn-soft: color-mix(in srgb, var(--turn) 10%, transparent);
   --tile-w: 34px;
   --tile-h: 46px;
   --r: 5px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --bg: #131210;
-    --panel: #1b1a17;
-    --face: #24221e;
-    --back: #2e2b26;
-    --line: rgba(240, 236, 228, 0.16);
-    --line-soft: rgba(240, 236, 228, 0.08);
-    --ink: #eae5dc;
-    --muted: #8d867a;
-    --accent: #eae5dc;
-    --red: #d9736a;
-    --green: #74a682;
-    --blue: #7ba0d4;
-    --turn: #e6a84a;
-    --turn-soft: rgba(230, 168, 74, 0.1);
-    --turn-bg: #2f281c;
-  }
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+/* Accents also apply to any element carrying the attribute, so the picker's swatches
+   preview their own colour. */
+[data-accent='amber'] {
+  --turn: light-dark(#c47a12, #e6a84a);
+  --turn-bg: light-dark(#f6ede1, #2f281c);
+}
+
+[data-accent='jade'] {
+  --turn: light-dark(#2f8a66, #5fc49a);
+  --turn-bg: light-dark(#e3f1ea, #1a2b24);
+}
+
+[data-accent='blue'] {
+  --turn: light-dark(#3566c4, #7aa2ec);
+  --turn-bg: light-dark(#e5ecf8, #1b2233);
+}
+
+[data-accent='violet'] {
+  --turn: light-dark(#7a4fc4, #a98ae8);
+  --turn-bg: light-dark(#eee8f8, #251e33);
+}
+
+[data-accent='rose'] {
+  --turn: light-dark(#c4456a, #e8849f);
+  --turn-bg: light-dark(#f8e6ec, #321d24);
 }
 
 * {
@@ -52,7 +70,7 @@ body {
 body {
   background: var(--bg);
   color: var(--ink);
-  font: 400 14px/1.45 ui-sans-serif, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  font: 400 14px/1.45 'Fira Sans', -apple-system, 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   /* No double-tap zoom: touch discards are tap, tap. */
   touch-action: manipulation;
@@ -81,9 +99,9 @@ body {
 
 .brand {
   font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-size: 11px;
+  letter-spacing: 0.08em;
+  font-size: 17px;
+  line-height: 1;
 }
 
 .meta {
@@ -99,6 +117,128 @@ body {
 .meta b {
   color: var(--ink);
   font-weight: 500;
+}
+
+.prefs {
+  position: relative;
+  align-self: center;
+}
+
+.prefs-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.prefs-btn:hover,
+.prefs-btn.on {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+
+.prefs-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.prefs-panel .label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.prefs-panel .label + * {
+  margin-bottom: 4px;
+}
+
+.swatches {
+  display: flex;
+  gap: 8px;
+}
+
+.swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--panel);
+  background: var(--turn);
+  box-shadow: 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+
+.swatch.on {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.seg {
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.seg button {
+  flex: 1;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.seg button.on {
+  background: var(--turn);
+  color: var(--bg);
+  font-weight: 500;
+}
+
+.wall {
+  flex-basis: 100%;
+  display: flex;
+  gap: 2px;
+  margin-top: -6px;
+}
+
+.wall .stack {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.wall i {
+  height: 5px;
+  border-radius: 1.5px;
+  background: var(--line-soft);
+}
+
+.wall i.in {
+  background: color-mix(in srgb, var(--muted) 65%, transparent);
+}
+
+.wall i.end {
+  background: var(--turn);
 }
 
 /* ---------- table ---------- */
@@ -167,7 +307,7 @@ body {
   border: 1px solid var(--line);
   color: var(--ink);
   font-weight: 600;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0;
 }
 
@@ -466,7 +606,7 @@ body {
   border-radius: 50%;
   background: var(--line-soft);
   color: var(--ink);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 /* The lit chip's fill is a separate pill that glides from seat to seat. */
