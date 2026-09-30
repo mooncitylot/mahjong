@@ -446,6 +446,34 @@ body {
   opacity: 0.75;
 }
 
+/* Drawn suit marks, sized in em so every tile-size rule above scales them too. */
+.tile .mark.m-dot,
+.tile .mark.m-bam {
+  opacity: 1;
+  font-size: 12px;
+  flex: none;
+}
+
+/* A coin: solid ring around a solid centre. */
+.tile .mark.m-dot {
+  width: 0.95em;
+  height: 0.95em;
+  border-radius: 50%;
+  border: 0.16em solid currentColor;
+  background: radial-gradient(circle, currentColor 0 28%, transparent 30%);
+}
+
+/* Two bamboo sticks, each with a joint across the middle. */
+.tile .mark.m-bam {
+  width: 0.8em;
+  height: 1em;
+  --stick: linear-gradient(currentColor 0 40%, transparent 40% 56%, currentColor 56%);
+  background:
+    var(--stick) left / 0.3em 100% no-repeat,
+    var(--stick) right / 0.3em 100% no-repeat;
+  border-radius: 0.12em;
+}
+
 .tile.honor .face {
   font-size: 17px;
 }

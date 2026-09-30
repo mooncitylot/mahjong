@@ -4,6 +4,7 @@ import {
   SEAT_NAMES,
   seatWindTile,
   isHonor,
+  suitOf,
   tileFace,
   tileMark,
   tileClass,
@@ -65,8 +66,15 @@ function tileEl(t: Tile, o: TileOpts = {}): HTMLElement {
   if (o.recent) node.classList.add('recent');
   if (o.dim) node.classList.add('dim');
   node.append(el('span', 'face', tileFace(t)));
-  const mark = tileMark(t);
-  if (mark) node.append(el('span', 'mark', mark));
+  if (!isHonor(t) && suitOf(t) !== 2) {
+    // Dots and bams are drawn as shapes: their text marks are too thin to tell apart at tile size.
+    const m = el('span', `mark ${suitOf(t) === 0 ? 'm-dot' : 'm-bam'}`);
+    m.setAttribute('aria-hidden', 'true');
+    node.append(m);
+  } else {
+    const mark = tileMark(t);
+    if (mark) node.append(el('span', 'mark', mark));
+  }
   node.setAttribute('title', tileName(t));
   if (o.onClick) {
     node.classList.add('pick');
