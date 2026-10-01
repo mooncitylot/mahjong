@@ -298,16 +298,23 @@ body {
     0 4px 18px var(--turn-soft);
 }
 
+/* Wind and avatar are a matched pair of rings. */
+.seat-head .wind,
+.seat-head .avatar {
+  box-sizing: border-box;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+}
+
 .seat-head .wind {
   display: inline-grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid var(--line);
   color: var(--ink);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0;
 }
 
@@ -368,9 +375,11 @@ body {
 
 .seat-head .avatar {
   display: inline-flex;
-  width: 26px;
-  height: 26px;
-  margin: -3px -2px -3px 0;
+  overflow: hidden;
+}
+
+.seat.active .seat-head .avatar {
+  border-color: var(--turn);
 }
 
 .seat-head .avatar svg {
