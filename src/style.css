@@ -614,6 +614,30 @@ body {
   opacity: 0.45;
 }
 
+.tile.hint-discard,
+.tile.hint-keep {
+  position: relative;
+}
+
+.tile .hint-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--face);
+  pointer-events: none;
+}
+
+.tile.hint-discard .hint-dot {
+  background: var(--red);
+}
+
+.tile.hint-keep .hint-dot {
+  background: var(--green);
+}
+
 /* ---------- centre / actions ---------- */
 
 .center {

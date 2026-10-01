@@ -11,6 +11,8 @@ interface Prefs {
   accent?: Accent;
   /** Unset means follow the OS. */
   theme?: Theme;
+  /** Mark which tiles in your hand to discard and which to keep. */
+  hints?: boolean;
 }
 
 function read(): Prefs {
@@ -50,4 +52,12 @@ export function toggleTheme(): void {
   const t: Theme = theme() === 'dark' ? 'light' : 'dark';
   write({ ...read(), theme: t });
   document.documentElement.dataset.theme = t;
+}
+
+export function hints(): boolean {
+  return read().hints === true;
+}
+
+export function setHints(on: boolean): void {
+  write({ ...read(), hints: on });
 }

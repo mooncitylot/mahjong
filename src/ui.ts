@@ -25,7 +25,8 @@ import {
 import { shanten, waits } from './shanten.js';
 import { avatarSvg } from './avatar.js';
 import type { Engine } from './engine.js';
-import { ACCENTS, accent, setAccent, theme, toggleTheme } from './prefs.js';
+import { ACCENTS, accent, setAccent, theme, toggleTheme, hints, setHints } from './prefs.js';
+import { rateDiscards } from './bot.js';
 
 const el = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -211,6 +212,35 @@ function chowLabel(start: Tile): string {
   return `Chow ${tileFace(start)}${tileFace(start + 1)}${tileFace(start + 2)}${tileMark(start)}`;
 }
 
+type Hint = 'discard' | 'keep';
+
+/**
+ * Hint per tile kind for the human's turn: the bot's top-rated discard(s) are 'discard',
+ * and tiles whose loss would set the hand back a step are 'keep'.
+ */
+function handHints(g: GameState, actions: SelfAction[]): Map<Tile, Hint> {
+  const out = new Map<Tile, Hint>();
+  if (!hints() || !actions.some((a) => a.kind === 'discard')) return out;
+  const rated = rateDiscards(g, HUMAN);
+  if (rated.length < 2) return out;
+  const bestKey = Math.max(...rated.map((r) => r.key));
+  const bestSh = Math.min(...rated.map((r) => r.shanten));
+  for (const r of rated) {
+    if (r.key === bestKey) out.set(r.tile, 'discard');
+    else if (r.shanten > bestSh) out.set(r.tile, 'keep');
+  }
+  return out;
+}
+
+function addHint(n: HTMLElement, h: Hint | undefined): void {
+  if (!h) return;
+  n.classList.add(`hint-${h}`);
+  const dot = el('span', 'hint-dot');
+  dot.setAttribute('aria-hidden', 'true');
+  n.append(dot);
+  n.title += h === 'discard' ? ' · hint: discard' : ' · hint: keep';
+}
+
 function humanSeat(engine: Engine): HTMLElement {
   const g = engine.state;
   const p = g.players[HUMAN];
@@ -225,6 +255,7 @@ function humanSeat(engine: Engine): HTMLElement {
     (selected === 'drawn' && drawn === null) ||
     (typeof selected === 'number' && selected >= p.hand.length);
   if (!canAct || stale) selected = null;
+  const hinted = handHints(g, actions);
 
   const pick = (slot: number | 'drawn', t: Tile) => (): void => {
     if (engine.pending?.kind !== 'act') return;
@@ -249,6 +280,7 @@ function humanSeat(engine: Engine): HTMLElement {
   };
   p.hand.forEach((t, i) => {
     const n = tileEl(t, { key: handKey(t), onClick: canAct ? pick(i, t) : undefined });
+    addHint(n, hinted.get(t));
     if (selected === i) n.classList.add('selected');
     conc.append(n);
   });
@@ -259,6 +291,7 @@ function humanSeat(engine: Engine): HTMLElement {
       onClick: canAct ? pick('drawn', drawn) : undefined,
     });
     d.classList.add('drawn');
+    addHint(d, hinted.get(drawn));
     if (selected === 'drawn') d.classList.add('selected');
     line.append(d);
   }
@@ -470,6 +503,21 @@ function prefsMenu(): HTMLElement {
     seg.append(b);
   }
   panel.append(seg);
+
+  panel.append(el('div', 'label', 'Hints'));
+  const hintSeg = el('div', 'seg');
+  const hintsOn = hints();
+  for (const on of [false, true]) {
+    const b = el('button', on === hintsOn ? 'on' : '', on ? 'On' : 'Off');
+    b.setAttribute('aria-pressed', String(on === hintsOn));
+    b.title = 'Red dot: good discard. Green dot: worth keeping.';
+    b.addEventListener('click', () => {
+      setHints(on);
+      rerender();
+    });
+    hintSeg.append(b);
+  }
+  panel.append(hintSeg);
 
   wrap.append(panel);
   return wrap;

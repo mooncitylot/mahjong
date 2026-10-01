@@ -112,7 +112,6 @@ export function botTurn(g: GameState, seat: number): SelfAction {
   const full = handOf(g, seat as 0 | 1 | 2 | 3);
   const counts = toCounts(full);
   const fixed = p.melds.length;
-  const seatWind = (seat - g.dealer + 4) % 4;
 
   // A concealed kong is nearly free value when the tile is dead weight anyway.
   for (const a of actions) {
@@ -131,22 +130,42 @@ export function botTurn(g: GameState, seat: number): SelfAction {
 
   let best: SelfAction | null = null;
   let bestKey = -Infinity;
-  for (const a of actions) {
-    if (a.kind !== 'discard') continue;
+  for (const r of rateDiscards(g, seat)) {
+    if (r.key > bestKey) {
+      bestKey = r.key;
+      best = { kind: 'discard', tile: r.tile };
+    }
+  }
+  return best ?? actions.find((a) => a.kind === 'discard')!;
+}
+
+export interface DiscardRating {
+  tile: Tile;
+  /** Shanten left after throwing this tile. */
+  shanten: number;
+  /** Higher is a better discard. */
+  key: number;
+}
+
+/** How good each distinct tile in the seat's hand (drawn tile included) is to throw away. */
+export function rateDiscards(g: GameState, seat: number): DiscardRating[] {
+  const p = g.players[seat];
+  const counts = toCounts(handOf(g, seat as 0 | 1 | 2 | 3));
+  const fixed = p.melds.length;
+  const seatWind = (seat - g.dealer + 4) % 4;
+  const out: DiscardRating[] = [];
+  for (let tile = 0; tile < TILE_KINDS; tile++) {
+    if (counts[tile] === 0) continue;
     const c = counts.slice();
-    c[a.tile]--;
+    c[tile]--;
     const sh = shanten(c, fixed);
     const w = waits(c, fixed);
     const live = w.reduce((s, t) => s + liveCount(g, seat, t), 0);
     const pot = potential(c, p, seatWind, g.prevalentWind);
-    const safety = isolation(counts, a.tile);
-    const key = -sh * 1000 + live * 12 + pot * 8 + safety * 2 + w.length;
-    if (key > bestKey) {
-      bestKey = key;
-      best = a;
-    }
+    const safety = isolation(counts, tile);
+    out.push({ tile, shanten: sh, key: -sh * 1000 + live * 12 + pot * 8 + safety * 2 + w.length });
   }
-  return best ?? actions.find((a) => a.kind === 'discard')!;
+  return out;
 }
 
 /** Null means pass. */
